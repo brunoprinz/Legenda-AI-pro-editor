@@ -1,29 +1,24 @@
-import { GoogleGenAI, Type } from "@google/genai";
+import { GoogleGenAI } from "@google/genai";
 import { Subtitle } from "../types";
 
-// Helper to convert audio buffer to base64 suitable for Gemini
+// Helper para converter o áudio
 function bufferToBase64(buffer: ArrayBuffer): string {
   let binary = '';
   const bytes = new Uint8Array(buffer);
-  const len = bytes.byteLength;
-  for (let i = 0; i < len; i++) {
+  for (let i = 0; i < bytes.byteLength; i++) {
     binary += String.fromCharCode(bytes[i]);
   }
   return btoa(binary);
 }
 
-// Downsample audio to reduce bandwidth/processing (16kHz mono)
+// Otimiza o áudio para a IA (16kHz mono)
 async function processAudioForGemini(audioFile: File): Promise<string> {
-  const audioContext = new OfflineAudioContext(1, 44100, 44100); // Temporary context
-  
-  // Read file
   const arrayBuffer = await audioFile.arrayBuffer();
-  const audioBuffer = await new AudioContext().decodeAudioData(arrayBuffer); // Use native decoder
-
-  // Calculate new length for 16kHz
+  const audioCtx = new AudioContext();
+  const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+  
   const targetSampleRate = 16000;
-  const duration = audioBuffer.duration;
-  const offlineCtx = new OfflineAudioContext(1, duration * targetSampleRate, targetSampleRate);
+  const offlineCtx = new OfflineAudioContext(1, audioBuffer.duration * targetSampleRate, targetSampleRate);
   
   const source = offlineCtx.createBufferSource();
   source.buffer = audioBuffer;
@@ -31,117 +26,75 @@ async function processAudioForGemini(audioFile: File): Promise<string> {
   source.start();
   
   const renderedBuffer = await offlineCtx.startRendering();
-  
-  // Convert float32 pcm to int16 for efficient transfer or just use raw data logic
-  // For Gemini, we can send standard audio formats. Since we decoded to raw, 
-  // let's wrap it in a simple WAV container to ensure the model understands the format/rate.
   return encodeWAV(renderedBuffer);
 }
 
 function encodeWAV(samples: AudioBuffer): string {
   const buffer = samples.getChannelData(0);
-  const sampleRate = samples.sampleRate;
-  const numChannels = 1;
-  const length = buffer.length * 2; // 16-bit
+  const length = buffer.length * 2;
   const arrayBuffer = new ArrayBuffer(44 + length);
   const view = new DataView(arrayBuffer);
 
-  // RIFF identifier
+  const writeString = (view: DataView, offset: number, string: string) => {
+    for (let i = 0; i < string.length; i++) view.setUint8(offset + i, string.charCodeAt(i));
+  };
+
   writeString(view, 0, 'RIFF');
-  // RIFF chunk length
   view.setUint32(4, 36 + length, true);
-  // RIFF type
   writeString(view, 8, 'WAVE');
-  // format chunk identifier
   writeString(view, 12, 'fmt ');
-  // format chunk length
   view.setUint32(16, 16, true);
-  // sample format (raw)
   view.setUint16(20, 1, true);
-  // channel count
-  view.setUint16(22, numChannels, true);
-  // sample rate
-  view.setUint32(24, sampleRate, true);
-  // byte rate (sample rate * block align)
-  view.setUint32(28, sampleRate * 2, true);
-  // block align (channel count * bytes per sample)
-  view.setUint16(32, numChannels * 2, true);
-  // bits per sample
+  view.setUint16(22, 1, true);
+  view.setUint32(24, 16000, true);
+  view.setUint32(28, 16000 * 2, true);
+  view.setUint16(32, 2, true);
   view.setUint16(34, 16, true);
-  // data chunk identifier
   writeString(view, 36, 'data');
-  // data chunk length
   view.setUint32(40, length, true);
 
-  // write the PCM samples
   let offset = 44;
   for (let i = 0; i < buffer.length; i++) {
     const s = Math.max(-1, Math.min(1, buffer[i]));
     view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
     offset += 2;
   }
-
   return bufferToBase64(arrayBuffer);
 }
 
-function writeString(view: DataView, offset: number, string: string) {
-  for (let i = 0; i < string.length; i++) {
-    view.setUint8(offset + i, string.charCodeAt(i));
-  }
-}
-
-// Helper to ensure timestamp is a number
-const parseTimestamp = (val: any): number => {
-  if (typeof val === 'number') return val;
-  if (typeof val === 'string') {
-    // Try parsing "MM:SS.mmm"
-    if (val.includes(':')) {
-      const parts = val.split(':');
-      if (parts.length === 2) {
-        return (parseInt(parts[0]) * 60) + parseFloat(parts[1]);
-      }
-      if (parts.length === 3) {
-        return (parseInt(parts[0]) * 3600) + (parseInt(parts[1]) * 60) + parseFloat(parts[2]);
-      }
-    }
-    return parseFloat(val);
-  }
-  return 0;
-};
-
 export const generateSubtitles = async (videoFile: File): Promise<Subtitle[]> => {
+  // Lendo do ambiente Vite do Replit
   const apiKey = (import.meta as any).env.VITE_GEMINI_API_KEY || "";
-  const ai = new GoogleGenAI(apiKey); // Note: Dependendo da versão, pode ser new GoogleGenAI({ apiKey }) ou apenas (apiKey)
   
-  // 1. Prepara o áudio
+  if (!apiKey) {
+    throw new Error("API Key não encontrada no Secrets do Replit.");
+  }
+
+  const genAI = new GoogleGenAI(apiKey);
   const base64Audio = await processAudioForGemini(videoFile);
   
-  // Modelos para tentar (o 2.0 Flash costuma ser o padrão atual, se falhar tenta o 1.5)
-  const models = ['gemini-2.0-flash-exp', 'gemini-1.5-flash'];
-  let lastError = null;
+  // Lista de modelos para tentar (Plano de segurança)
+  const models = ['gemini-1.5-flash', 'gemini-2.0-flash-exp'];
+  let lastError: any = null;
 
   for (const modelName of models) {
     try {
-      console.log(`Tentando gerar legendas com o modelo: ${modelName}...`);
-      const model = ai.getGenerativeModel({ model: modelName });
+      console.log(`Tentando IA com: ${modelName}`);
+      const model = genAI.getGenerativeModel({ model: modelName });
 
       const result = await model.generateContent({
         contents: [{
           parts: [
             { inlineData: { mimeType: 'audio/wav', data: base64Audio } },
-            { text: `Transcreva o áudio para legendas em Português. Retorne APENAS um JSON array. 
-                     Cada objeto deve ter "start" (number), "end" (number) e "text" (string).` }
+            { text: "Transcreva o áudio para legendas em Português. Retorne APENAS um JSON array com objetos contendo 'start' (number em segundos), 'end' (number) e 'text' (string)." }
           ]
         }],
-        generationConfig: {
-          responseMimeType: "application/json",
-        }
+        generationConfig: { responseMimeType: "application/json" }
       });
 
       const response = await result.response;
-      const rawData = JSON.parse(response.text());
-      
-      console.log(`Sucesso com o modelo ${modelName}!`);
+      const text = response.text();
+      const rawData = JSON.parse(text);
       
       return rawData.map((item: any, index: number) => ({
         id: `auto-${index}-${Date.now()}`,
@@ -152,44 +105,12 @@ export const generateSubtitles = async (videoFile: File): Promise<Subtitle[]> =>
 
     } catch (e: any) {
       lastError = e;
-      if (e.message?.includes('429') || e.message?.toLowerCase().includes('quota')) {
-        console.warn(`Cota excedida no modelo ${modelName}. Tentando o próximo...`);
-        continue;
-      }
+      console.warn(`Falha no modelo ${modelName}:`, e.message);
+      // Se for erro de cota, tenta o próximo
+      if (e.message?.includes('429') || e.message?.toLowerCase().includes('quota')) continue;
       break; 
     }
   }
 
-  throw new Error(`Erro ao gerar legendas: ${lastError?.message || "Limite de cota atingido"}`);
-};
-
-  let rawData: any[] = [];
-  const responseText = response.text || "[]";
-
-  try {
-    rawData = JSON.parse(responseText);
-  } catch (e) {
-    console.warn("JSON parse failed, attempting regex extraction to recover partial data", e);
-    // Fallback: Extract valid JSON objects even if the array isn't closed properly
-    // This handles cases where output tokens are truncated
-    const regex = /\{\s*"start"\s*:\s*[\d\.]+\s*,\s*"end"\s*:\s*[\d\.]+\s*,\s*"text"\s*:\s*"[^"]*"\s*\}/g;
-    // Note: The regex above is simple and might miss objects with extra spaces or escaped quotes differently.
-    // A more lenient approach is usually trying to match balanced braces, but for this specific schema, simple is often enough.
-    // Let's try a slightly more robust regex for the specific schema keys
-    const relaxedRegex = /\{[^}]*"start"[^}]*"end"[^}]*"text"[^}]*\}/g;
-    
-    const matches = responseText.match(relaxedRegex);
-    if (matches) {
-      rawData = matches.map(m => {
-        try { return JSON.parse(m); } catch { return null; }
-      }).filter(x => x);
-    }
-  }
-  
-  return rawData.map((item: any, index: number) => ({
-    id: `auto-${index}-${Date.now()}`,
-    startTime: parseTimestamp(item.start),
-    endTime: parseTimestamp(item.end),
-    text: item.text
-  }));
+  throw new Error(`Erro ao gerar legendas: ${lastError?.message || "Cota excedida"}`);
 };
