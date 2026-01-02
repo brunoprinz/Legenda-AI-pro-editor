@@ -1,17 +1,20 @@
 import React, { useState, useRef } from 'react';
-import { Upload, Wand2, Download, Type, Scissors, Copy, ExternalLink } from 'lucide-react';
-import VideoPlayer from './components/VideoPlayer';
+import { Upload, Wand2, Type, Copy, ExternalLink, Download } from 'lucide-react';
+// Importamos apenas o que você realmente tem na pasta components
 import Timeline from './components/Timeline';
-import SubtitleEditor from './components/SubtitleEditor';
-import ExportSettings from './components/ExportSettings';
-import { Subtitle } from './types';
+
+// Definimos a interface aqui mesmo para evitar erros de importação de tipos
+interface Subtitle {
+  startTime: number;
+  endTime: number;
+  text: string;
+}
 
 function App() {
   const [videoFile, setVideoFile] = useState<File | null>(null);
   const [videoUrl, setVideoUrl] = useState<string>('');
   const [subtitles, setSubtitles] = useState<Subtitle[]>([]);
   const [currentTime, setCurrentTime] = useState(0);
-  const [isPlaying, setIsPlaying] = useState(false);
   const [step, setStep] = useState<'upload' | 'generate' | 'edit'>('upload');
   const [jsonInput, setJsonInput] = useState('');
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -27,24 +30,23 @@ function App() {
 
   const copiarPromptParaIA = () => {
     const prompt = `Analise o áudio deste vídeo e gere legendas sincronizadas em Português do Brasil.
-Retorne APENAS um array JSON puro (sem explicações ou markdown), seguindo exatamente este modelo:
+Retorne APENAS um array JSON puro, seguindo exatamente este modelo:
 [
   {"startTime": 0.5, "endTime": 3.0, "text": "Bem-vindos ao meu canal!"},
   {"startTime": 3.2, "endTime": 5.0, "text": "Hoje falaremos sobre marketing."}
 ]`;
     navigator.clipboard.writeText(prompt);
-    alert("Prompt copiado! Agora suba seu vídeo no Gemini/ChatGPT, cole o prompt e depois traga o JSON para cá.");
+    alert("Prompt copiado! Vá ao Gemini, cole o prompt e traga o JSON.");
   };
 
   const processarLegendasManuais = () => {
     try {
-      // Limpa possíveis marcações de markdown se o usuário colar com ```json
       const cleanJson = jsonInput.replace(/```json|```/g, "").trim();
       const parsed = JSON.parse(cleanJson);
       setSubtitles(parsed);
       setStep('edit');
     } catch (error) {
-      alert("Erro ao ler o JSON. Verifique se você copiou o código completo da IA.");
+      alert("Erro no JSON. Verifique se copiou o código completo.");
     }
   };
 
@@ -53,9 +55,7 @@ Retorne APENAS um array JSON puro (sem explicações ou markdown), seguindo exat
       <div className="max-w-6xl mx-auto">
         <header className="flex justify-between items-center mb-8">
           <div className="flex items-center gap-2">
-            <div className="bg-red-600 p-2 rounded-lg">
-              <Type size={24} />
-            </div>
+            <div className="bg-red-600 p-2 rounded-lg"><Type size={24} /></div>
             <h1 className="text-2xl font-bold italic">LegendaAI <span className="text-red-500">PRO</span></h1>
           </div>
         </header>
@@ -64,91 +64,60 @@ Retorne APENAS um array JSON puro (sem explicações ou markdown), seguindo exat
           <div className="bg-slate-800 border-2 border-dashed border-slate-700 rounded-2xl p-20 text-center">
             <input type="file" accept="video/*" onChange={handleFileUpload} id="video-upload" className="hidden" />
             <label htmlFor="video-upload" className="cursor-pointer flex flex-col items-center">
-              <div className="bg-slate-700 p-6 rounded-full mb-4">
-                <Upload size={48} className="text-blue-400" />
-              </div>
-              <h2 className="text-2xl font-bold mb-2">Comece por aqui</h2>
-              <p className="text-slate-400 mb-8">Selecione o vídeo que você deseja legendar</p>
-              <span className="bg-blue-600 hover:bg-blue-700 px-8 py-3 rounded-full font-bold transition">
-                Selecionar Vídeo
-              </span>
+              <Upload size={48} className="text-blue-400 mb-4" />
+              <h2 className="text-2xl font-bold mb-2">Selecione o vídeo</h2>
+              <span className="bg-blue-600 px-8 py-3 rounded-full font-bold">Upload</span>
             </label>
           </div>
         )}
 
         {step === 'generate' && (
           <div className="max-w-2xl mx-auto bg-slate-800 rounded-2xl p-8 border border-slate-700">
-            <h2 className="text-2xl font-bold mb-6 flex items-center gap-2">
-              <Wand2 className="text-purple-400" /> Gerar Legendas (Via IA Externa)
-            </h2>
-            
+            <h2 className="text-2xl font-bold mb-6 flex items-center gap-2"><Wand2 /> Gerar via Gemini</h2>
             <div className="space-y-6">
-              <div className="bg-slate-900 p-4 rounded-xl border border-blue-900/30">
-                <p className="text-sm text-blue-300 mb-4">
-                  Como as APIs do Google costumam instabilizar em navegadores antigos, usamos o método 
-                  "MarketPulse" para garantir que você nunca fique na mão.
-                </p>
-                <div className="flex gap-4">
-                  <button onClick={copiarPromptParaIA} className="flex-1 bg-slate-700 hover:bg-slate-600 p-3 rounded-lg flex items-center justify-center gap-2 transition">
-                    <Copy size={18} /> 1. Copiar Prompt
-                  </button>
-                  <a href="[https://gemini.google.com/app](https://gemini.google.com/app)" target="_blank" className="flex-1 bg-slate-700 hover:bg-slate-600 p-3 rounded-lg flex items-center justify-center gap-2 transition">
-                    <ExternalLink size={18} /> 2. Abrir Gemini
-                  </a>
-                </div>
+              <div className="flex gap-4">
+                <button onClick={copiarPromptParaIA} className="flex-1 bg-slate-700 p-3 rounded-lg flex items-center justify-center gap-2 transition"><Copy size={18} /> 1. Copiar Prompt</button>
+                <a href="https://gemini.google.com/app" target="_blank" className="flex-1 bg-slate-700 p-3 rounded-lg flex items-center justify-center gap-2 transition"><ExternalLink size={18} /> 2. Abrir Gemini</a>
               </div>
-
-              <div>
-                <label className="block text-sm font-medium text-slate-400 mb-2">
-                  3. Cole o JSON gerado pela IA abaixo:
-                </label>
-                <textarea 
-                  className="w-full h-40 bg-slate-950 border border-slate-700 rounded-xl p-4 font-mono text-sm text-green-400"
-                  placeholder='[{"startTime": 0.0, "endTime": 2.0, "text": "Exemplo"}]'
-                  value={jsonInput}
-                  onChange={(e) => setJsonInput(e.target.value)}
-                />
-              </div>
-
-              <button 
-                onClick={processarLegendasManuais}
-                disabled={!jsonInput}
-                className="w-full bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 disabled:opacity-50 p-4 rounded-xl font-bold text-lg transition shadow-xl"
-              >
-                Gerar Legendas no Vídeo
-              </button>
+              <textarea 
+                className="w-full h-40 bg-slate-950 border border-slate-700 rounded-xl p-4 font-mono text-sm text-green-400"
+                placeholder='Cole o JSON aqui...'
+                value={jsonInput}
+                onChange={(e) => setJsonInput(e.target.value)}
+              />
+              <button onClick={processarLegendasManuais} className="w-full bg-blue-600 p-4 rounded-xl font-bold transition">Visualizar no Vídeo</button>
             </div>
           </div>
         )}
 
         {step === 'edit' && videoUrl && (
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-            <div className="lg:col-span-2 space-y-6">
-              <VideoPlayer 
-                url={videoUrl} 
-                subtitles={subtitles}
-                onTimeUpdate={setCurrentTime}
-                setIsPlaying={setIsPlaying}
-                videoRef={videoRef}
+          <div className="space-y-6">
+            <div className="relative bg-black rounded-xl overflow-hidden aspect-video max-w-3xl mx-auto">
+              <video 
+                ref={videoRef}
+                src={videoUrl} 
+                className="w-full h-full" 
+                controls
+                onTimeUpdate={(e) => setCurrentTime(e.currentTarget.currentTime)}
               />
-              <Timeline 
-                subtitles={subtitles}
-                currentTime={currentTime}
-                duration={videoRef.current?.duration || 0}
-                onSubtitleChange={setSubtitles}
-              />
+              {/* Overlay de Legenda Simples */}
+              <div className="absolute bottom-10 left-0 right-0 text-center px-4">
+                <p className="inline-block bg-black/70 text-white text-xl px-4 py-1 rounded">
+                  {subtitles.find(s => currentTime >= s.startTime && currentTime <= s.endTime)?.text || ""}
+                </p>
+              </div>
             </div>
-            <div className="space-y-6">
-              <SubtitleEditor 
-                subtitles={subtitles}
-                currentTime={currentTime}
-                onSubtitleChange={setSubtitles}
-              />
-              <ExportSettings 
-                videoFile={videoFile!}
-                subtitles={subtitles}
-              />
-            </div>
+            
+            <Timeline 
+              subtitles={subtitles}
+              currentTime={currentTime}
+              duration={videoRef.current?.duration || 0}
+              onSubtitleChange={setSubtitles}
+            />
+            
+            <button onClick={() => window.print()} className="w-full bg-green-600 p-4 rounded-xl font-bold flex items-center justify-center gap-2">
+              <Download size={20} /> Salvar Projeto (PDF/Print)
+            </button>
           </div>
         )}
       </div>
