@@ -57,7 +57,7 @@ function encodeWAV(samples: AudioBuffer): string {
 }
 
 export const generateSubtitles = async (videoFile: File): Promise<Subtitle[]> => {
-  const apiKey = (import.meta as any).env.VITE_GEMINI_API_KEY || "";
+  const apiKey = "AIzaSyCbtIsPGHrmtTULSqYJLgcD9mr-iFzIWhw";
   if (!apiKey) throw new Error("Chave de API não configurada nos Secrets.");
 
   const genAI = new GoogleGenAI(apiKey);
