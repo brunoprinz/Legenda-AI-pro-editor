@@ -1,7 +1,7 @@
 import { GoogleGenAI } from "@google/genai";
 import { Subtitle } from "../types";
 
-// Helper para converter o áudio
+// Conversor de áudio
 function bufferToBase64(buffer: ArrayBuffer): string {
   let binary = '';
   const bytes = new Uint8Array(buffer);
@@ -11,20 +11,17 @@ function bufferToBase64(buffer: ArrayBuffer): string {
   return btoa(binary);
 }
 
-// Otimiza o áudio para a IA (16kHz mono)
+// Otimização de áudio para IA
 async function processAudioForGemini(audioFile: File): Promise<string> {
   const arrayBuffer = await audioFile.arrayBuffer();
   const audioCtx = new AudioContext();
   const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
-  
   const targetSampleRate = 16000;
   const offlineCtx = new OfflineAudioContext(1, audioBuffer.duration * targetSampleRate, targetSampleRate);
-  
   const source = offlineCtx.createBufferSource();
   source.buffer = audioBuffer;
   source.connect(offlineCtx.destination);
   source.start();
-  
   const renderedBuffer = await offlineCtx.startRendering();
   return encodeWAV(renderedBuffer);
 }
@@ -34,11 +31,9 @@ function encodeWAV(samples: AudioBuffer): string {
   const length = buffer.length * 2;
   const arrayBuffer = new ArrayBuffer(44 + length);
   const view = new DataView(arrayBuffer);
-
-  const writeString = (view: DataView, offset: number, string: string) => {
-    for (let i = 0; i < string.length; i++) view.setUint8(offset + i, string.charCodeAt(i));
+  const writeString = (v: DataView, o: number, s: string) => {
+    for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i));
   };
-
   writeString(view, 0, 'RIFF');
   view.setUint32(4, 36 + length, true);
   writeString(view, 8, 'WAVE');
@@ -52,7 +47,6 @@ function encodeWAV(samples: AudioBuffer): string {
   view.setUint16(34, 16, true);
   writeString(view, 36, 'data');
   view.setUint32(40, length, true);
-
   let offset = 44;
   for (let i = 0; i < buffer.length; i++) {
     const s = Math.max(-1, Math.min(1, buffer[i]));
@@ -63,17 +57,13 @@ function encodeWAV(samples: AudioBuffer): string {
 }
 
 export const generateSubtitles = async (videoFile: File): Promise<Subtitle[]> => {
-  // Lendo do ambiente Vite do Replit
   const apiKey = (import.meta as any).env.VITE_GEMINI_API_KEY || "";
-  
-  if (!apiKey) {
-    throw new Error("API Key não encontrada no Secrets do Replit.");
-  }
+  if (!apiKey) throw new Error("Chave de API não configurada nos Secrets.");
 
   const genAI = new GoogleGenAI(apiKey);
   const base64Audio = await processAudioForGemini(videoFile);
   
-  // Lista de modelos para tentar (Plano de segurança)
+  // Lista de modelos (Inicia pelo mais estável)
   const models = ['gemini-1.5-flash', 'gemini-2.0-flash-exp'];
   let lastError: any = null;
 
@@ -81,36 +71,28 @@ export const generateSubtitles = async (videoFile: File): Promise<Subtitle[]> =>
     try {
       console.log(`Tentando IA com: ${modelName}`);
       const model = genAI.getGenerativeModel({ model: modelName });
-
       const result = await model.generateContent({
         contents: [{
           parts: [
             { inlineData: { mimeType: 'audio/wav', data: base64Audio } },
-            { text: "Transcreva o áudio para legendas em Português. Retorne APENAS um JSON array com objetos contendo 'start' (number em segundos), 'end' (number) e 'text' (string)." }
+            { text: "Transcreva o áudio para legendas em Português. Retorne APENAS um JSON array com objetos contendo 'start' (number), 'end' (number) e 'text' (string)." }
           ]
         }],
         generationConfig: { responseMimeType: "application/json" }
       });
-
       const response = await result.response;
-      const text = response.text();
-      const rawData = JSON.parse(text);
-      
+      const rawData = JSON.parse(response.text());
       return rawData.map((item: any, index: number) => ({
         id: `auto-${index}-${Date.now()}`,
         startTime: item.start,
         endTime: item.end,
         text: item.text
       }));
-
     } catch (e: any) {
       lastError = e;
-      console.warn(`Falha no modelo ${modelName}:`, e.message);
-      // Se for erro de cota, tenta o próximo
       if (e.message?.includes('429') || e.message?.toLowerCase().includes('quota')) continue;
       break; 
     }
   }
-
-  throw new Error(`Erro ao gerar legendas: ${lastError?.message || "Cota excedida"}`);
+  throw new Error(`Erro: ${lastError?.message || "Cota excedida"}`);
 };
