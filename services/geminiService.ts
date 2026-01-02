@@ -110,50 +110,58 @@ const parseTimestamp = (val: any): number => {
 };
 
 export const generateSubtitles = async (videoFile: File): Promise<Subtitle[]> => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const apiKey = (import.meta as any).env.VITE_GEMINI_API_KEY || "";
+  const ai = new GoogleGenAI(apiKey); // Note: Dependendo da versão, pode ser new GoogleGenAI({ apiKey }) ou apenas (apiKey)
   
-  // 1. Prepare Audio (Client-side optimization)
+  // 1. Prepara o áudio
   const base64Audio = await processAudioForGemini(videoFile);
   
-  // 2. Call Gemini
-  const response = await ai.models.generateContent({
-    model: 'gemini-2.5-flash',
-    contents: {
-      parts: [
-        {
-          inlineData: {
-            mimeType: 'audio/wav',
-            data: base64Audio
-          }
-        },
-        {
-          text: `Transcreva o áudio fornecido para legendas em Português.
-          Retorne APENAS um JSON array válido.
-          Certifique-se de cobrir todo o conteúdo do áudio.
-          
-          Cada objeto deve ter:
-          - "start": tempo em SEGUNDOS (number) ex: 12.5
-          - "end": tempo em SEGUNDOS (number) ex: 14.2
-          - "text": o texto falado.`
+  // Modelos para tentar (o 2.0 Flash costuma ser o padrão atual, se falhar tenta o 1.5)
+  const models = ['gemini-2.0-flash-exp', 'gemini-1.5-flash'];
+  let lastError = null;
+
+  for (const modelName of models) {
+    try {
+      console.log(`Tentando gerar legendas com o modelo: ${modelName}...`);
+      const model = ai.getGenerativeModel({ model: modelName });
+
+      const result = await model.generateContent({
+        contents: [{
+          parts: [
+            { inlineData: { mimeType: 'audio/wav', data: base64Audio } },
+            { text: `Transcreva o áudio para legendas em Português. Retorne APENAS um JSON array. 
+                     Cada objeto deve ter "start" (number), "end" (number) e "text" (string).` }
+          ]
+        }],
+        generationConfig: {
+          responseMimeType: "application/json",
         }
-      ]
-    },
-    config: {
-      responseMimeType: "application/json",
-      responseSchema: {
-        type: Type.ARRAY,
-        items: {
-          type: Type.OBJECT,
-          properties: {
-            start: { type: Type.NUMBER, description: "Start time in seconds" },
-            end: { type: Type.NUMBER, description: "End time in seconds" },
-            text: { type: Type.STRING, description: "Subtitle text" }
-          },
-          required: ["start", "end", "text"]
-        }
+      });
+
+      const response = await result.response;
+      const rawData = JSON.parse(response.text());
+      
+      console.log(`Sucesso com o modelo ${modelName}!`);
+      
+      return rawData.map((item: any, index: number) => ({
+        id: `auto-${index}-${Date.now()}`,
+        startTime: item.start,
+        endTime: item.end,
+        text: item.text
+      }));
+
+    } catch (e: any) {
+      lastError = e;
+      if (e.message?.includes('429') || e.message?.toLowerCase().includes('quota')) {
+        console.warn(`Cota excedida no modelo ${modelName}. Tentando o próximo...`);
+        continue;
       }
+      break; 
     }
-  });
+  }
+
+  throw new Error(`Erro ao gerar legendas: ${lastError?.message || "Limite de cota atingido"}`);
+};
 
   let rawData: any[] = [];
   const responseText = response.text || "[]";
