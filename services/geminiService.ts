@@ -1,98 +1,104 @@
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenerativeAI } from "@google/generative-ai";
 import { Subtitle } from "../types";
 
-// Conversor de áudio
-function bufferToBase64(buffer: ArrayBuffer): string {
-  let binary = '';
+// Função para converter o áudio do vídeo num formato que o Gemini aceita (Base64)
+const processAudioForGemini = async (videoFile: File): Promise<string> => {
+  const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+  const arrayBuffer = await videoFile.arrayBuffer();
+  const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+  
+  // Criamos um WAV simples (mono, 16khz) para ser leve
+  const wavBuffer = encodeWAV(audioBuffer);
+  return bufferToBase64(wavBuffer);
+};
+
+const bufferToBase64 = (buffer: ArrayBuffer): string => {
   const bytes = new Uint8Array(buffer);
+  let binary = '';
   for (let i = 0; i < bytes.byteLength; i++) {
     binary += String.fromCharCode(bytes[i]);
   }
-  return btoa(binary);
-}
+  return window.btoa(binary);
+};
 
-// Otimização de áudio para IA
-async function processAudioForGemini(audioFile: File): Promise<string> {
-  const arrayBuffer = await audioFile.arrayBuffer();
-  const audioCtx = new AudioContext();
-  const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
-  const targetSampleRate = 16000;
-  const offlineCtx = new OfflineAudioContext(1, audioBuffer.duration * targetSampleRate, targetSampleRate);
-  const source = offlineCtx.createBufferSource();
-  source.buffer = audioBuffer;
-  source.connect(offlineCtx.destination);
-  source.start();
-  const renderedBuffer = await offlineCtx.startRendering();
-  return encodeWAV(renderedBuffer);
-}
-
-function encodeWAV(samples: AudioBuffer): string {
-  const buffer = samples.getChannelData(0);
-  const length = buffer.length * 2;
-  const arrayBuffer = new ArrayBuffer(44 + length);
-  const view = new DataView(arrayBuffer);
-  const writeString = (v: DataView, o: number, s: string) => {
-    for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i));
+const encodeWAV = (audioBuffer: AudioBuffer): ArrayBuffer => {
+  const numChannels = 1;
+  const sampleRate = 16000;
+  const format = 1; // PCM
+  const bitDepth = 16;
+  
+  const bytesPerSample = bitDepth / 8;
+  const blockAlign = numChannels * bytesPerSample;
+  
+  const buffer = new ArrayBuffer(44 + audioBuffer.length * bytesPerSample);
+  const view = new DataView(buffer);
+  
+  // Cabeçalho WAV
+  const writeString = (offset: number, string: string) => {
+    for (let i = 0; i < string.length; i++) {
+      view.setUint8(offset + i, string.charCodeAt(i));
+    }
   };
-  writeString(view, 0, 'RIFF');
-  view.setUint32(4, 36 + length, true);
-  writeString(view, 8, 'WAVE');
-  writeString(view, 12, 'fmt ');
+  
+  writeString(0, 'RIFF');
+  view.setUint32(4, 36 + audioBuffer.length * bytesPerSample, true);
+  writeString(8, 'WAVE');
+  writeString(12, 'fmt ');
   view.setUint32(16, 16, true);
-  view.setUint16(20, 1, true);
-  view.setUint16(22, 1, true);
-  view.setUint32(24, 16000, true);
-  view.setUint32(28, 16000 * 2, true);
-  view.setUint16(32, 2, true);
-  view.setUint16(34, 16, true);
-  writeString(view, 36, 'data');
-  view.setUint32(40, length, true);
+  view.setUint16(20, format, true);
+  view.setUint16(22, numChannels, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * blockAlign, true);
+  view.setUint16(32, blockAlign, true);
+  view.setUint16(34, bitDepth, true);
+  writeString(36, 'data');
+  view.setUint32(40, audioBuffer.length * bytesPerSample, true);
+  
+  const channelData = audioBuffer.getChannelData(0);
   let offset = 44;
-  for (let i = 0; i < buffer.length; i++) {
-    const s = Math.max(-1, Math.min(1, buffer[i]));
-    view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+  for (let i = 0; i < channelData.length; i++) {
+    const sample = Math.max(-1, Math.min(1, channelData[i]));
+    view.setInt16(offset, sample < 0 ? sample * 0x8000 : sample * 0x7FFF, true);
     offset += 2;
   }
-  return bufferToBase64(arrayBuffer);
-}
+  
+  return buffer;
+};
 
 export const generateSubtitles = async (videoFile: File): Promise<Subtitle[]> => {
-  const apiKey = "AIzaSyCbtIsPGHrmtTULSqYJLgcD9mr-iFzIWhw";
-  if (!apiKey) throw new Error("Chave de API não configurada nos Secrets.");
-
-  const genAI = new GoogleGenAI(apiKey);
-  const base64Audio = await processAudioForGemini(videoFile);
+  // CONFIGURAÇÃO: Substitui as aspas abaixo pela tua chave quando fores para o Netlify
+  const apiKey = "AQUI_VAI_A_TUA_CHAVE_DO_GOOGLE"; 
   
-  // Lista de modelos (Inicia pelo mais estável)
-  const models = ['gemini-1.5-flash', 'gemini-2.0-flash-exp'];
-  let lastError: any = null;
-
-  for (const modelName of models) {
-    try {
-      console.log(`Tentando IA com: ${modelName}`);
-      const model = genAI.getGenerativeModel({ model: modelName });
-      const result = await model.generateContent({
-        contents: [{
-          parts: [
-            { inlineData: { mimeType: 'audio/wav', data: base64Audio } },
-            { text: "Transcreva o áudio para legendas em Português. Retorne APENAS um JSON array com objetos contendo 'start' (number), 'end' (number) e 'text' (string)." }
-          ]
-        }],
-        generationConfig: { responseMimeType: "application/json" }
-      });
-      const response = await result.response;
-      const rawData = JSON.parse(response.text());
-      return rawData.map((item: any, index: number) => ({
-        id: `auto-${index}-${Date.now()}`,
-        startTime: item.start,
-        endTime: item.end,
-        text: item.text
-      }));
-    } catch (e: any) {
-      lastError = e;
-      if (e.message?.includes('429') || e.message?.toLowerCase().includes('quota')) continue;
-      break; 
-    }
+  if (!apiKey || apiKey === "AQUI_VAI_A_TUA_CHAVE_DO_GOOGLE") {
+    throw new Error("Chave de API não configurada corretamente.");
   }
-  throw new Error(`Erro: ${lastError?.message || "Cota excedida"}`);
+
+  const genAI = new GoogleGenerativeAI(apiKey);
+  const base64Audio = await processAudioForGemini(videoFile);
+
+  const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+
+  const prompt = `Transcreva este áudio para legendas em Português do Brasil. 
+  Retorne APENAS um array JSON no formato: [{"startTime": 0.5, "endTime": 2.0, "text": "Exemplo"}].
+  Não use blocos de código Markdown, apenas o texto JSON puro.`;
+
+  const result = await model.generateContent([
+    prompt,
+    {
+      inlineData: {
+        mimeType: "audio/wav",
+        data: base64Audio
+      }
+    }
+  ]);
+
+  const response = await result.response;
+  const text = response.text();
+  
+  try {
+    return JSON.parse(text.replace(/```json|```/g, ""));
+  } catch (e) {
+    console.error("Erro ao processar JSON da IA:", text);
+    throw new Error("A IA não retornou um formato de legenda válido.");
+  }
 };
