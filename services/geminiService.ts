@@ -90,6 +90,25 @@ function writeString(view: DataView, offset: number, string: string) {
   }
 }
 
+// Helper to ensure timestamp is a number
+const parseTimestamp = (val: any): number => {
+  if (typeof val === 'number') return val;
+  if (typeof val === 'string') {
+    // Try parsing "MM:SS.mmm"
+    if (val.includes(':')) {
+      const parts = val.split(':');
+      if (parts.length === 2) {
+        return (parseInt(parts[0]) * 60) + parseFloat(parts[1]);
+      }
+      if (parts.length === 3) {
+        return (parseInt(parts[0]) * 3600) + (parseInt(parts[1]) * 60) + parseFloat(parts[2]);
+      }
+    }
+    return parseFloat(val);
+  }
+  return 0;
+};
+
 export const generateSubtitles = async (videoFile: File): Promise<Subtitle[]> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
@@ -97,7 +116,6 @@ export const generateSubtitles = async (videoFile: File): Promise<Subtitle[]> =>
   const base64Audio = await processAudioForGemini(videoFile);
   
   // 2. Call Gemini
-  // Use gemini-2.5-flash which is very efficient for audio
   const response = await ai.models.generateContent({
     model: 'gemini-2.5-flash',
     contents: {
@@ -110,13 +128,13 @@ export const generateSubtitles = async (videoFile: File): Promise<Subtitle[]> =>
         },
         {
           text: `Transcreva o áudio fornecido para legendas em Português.
-          Retorne APENAS um JSON array.
-          Cada objeto deve ter:
-          - "start": string no formato "MM:SS.mmm" ou segundos (number)
-          - "end": string no formato "MM:SS.mmm" ou segundos (number)
-          - "text": o texto falado nesse intervalo.
+          Retorne APENAS um JSON array válido.
+          Certifique-se de cobrir todo o conteúdo do áudio.
           
-          Seja preciso nos tempos.`
+          Cada objeto deve ter:
+          - "start": tempo em SEGUNDOS (number) ex: 12.5
+          - "end": tempo em SEGUNDOS (number) ex: 14.2
+          - "text": o texto falado.`
         }
       ]
     },
@@ -137,12 +155,33 @@ export const generateSubtitles = async (videoFile: File): Promise<Subtitle[]> =>
     }
   });
 
-  const rawData = JSON.parse(response.text || "[]");
+  let rawData: any[] = [];
+  const responseText = response.text || "[]";
+
+  try {
+    rawData = JSON.parse(responseText);
+  } catch (e) {
+    console.warn("JSON parse failed, attempting regex extraction to recover partial data", e);
+    // Fallback: Extract valid JSON objects even if the array isn't closed properly
+    // This handles cases where output tokens are truncated
+    const regex = /\{\s*"start"\s*:\s*[\d\.]+\s*,\s*"end"\s*:\s*[\d\.]+\s*,\s*"text"\s*:\s*"[^"]*"\s*\}/g;
+    // Note: The regex above is simple and might miss objects with extra spaces or escaped quotes differently.
+    // A more lenient approach is usually trying to match balanced braces, but for this specific schema, simple is often enough.
+    // Let's try a slightly more robust regex for the specific schema keys
+    const relaxedRegex = /\{[^}]*"start"[^}]*"end"[^}]*"text"[^}]*\}/g;
+    
+    const matches = responseText.match(relaxedRegex);
+    if (matches) {
+      rawData = matches.map(m => {
+        try { return JSON.parse(m); } catch { return null; }
+      }).filter(x => x);
+    }
+  }
   
   return rawData.map((item: any, index: number) => ({
     id: `auto-${index}-${Date.now()}`,
-    startTime: item.start,
-    endTime: item.end,
+    startTime: parseTimestamp(item.start),
+    endTime: parseTimestamp(item.end),
     text: item.text
   }));
 };

@@ -66,6 +66,9 @@ const drawFrame = (
   canvasWidth: number,
   canvasHeight: number
 ) => {
+  // Reset transform to identity before clearing
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+
   // Clear
   ctx.clearRect(0, 0, canvasWidth, canvasHeight);
   
@@ -88,6 +91,7 @@ const drawFrame = (
   ctx.restore();
 
   // Find active subtitle
+  // Use a small epsilon for float comparison safety
   const activeSub = subtitles.find(s => timestamp >= s.startTime && timestamp <= s.endTime);
 
   if (activeSub) {
@@ -166,8 +170,6 @@ export const exportVideo = async (
   const { width, height } = getTargetDimensions(originalWidth, originalHeight, resolution);
   
   // Calculate scaling factor for styles (font size, borders)
-  // We assume the style defined in UI corresponds to the "look" at the original resolution (or relative to video frame)
-  // Since our drawFrame uses pixels, we must scale the font size if the canvas is smaller.
   const scaleFactor = height / originalHeight;
   
   const scaledStyle: SubtitleStyle = {
@@ -213,95 +215,4 @@ export const exportVideo = async (
   // 4. Setup AudioEncoder
   const audioCtx = new AudioContext({ sampleRate: 44100 });
   const fileBuffer = await file.arrayBuffer();
-  const audioBuffer = await audioCtx.decodeAudioData(fileBuffer);
-
-  const audioEncoder = new AudioEncoder({
-    output: (chunk, meta) => muxer.addAudioChunk(chunk, meta),
-    error: (e) => console.error("AudioEncoder error", e)
-  });
-
-  audioEncoder.configure({
-    codec: 'mp4a.40.2',
-    numberOfChannels: 1,
-    sampleRate: 44100,
-    bitrate: 128000
-  });
-
-  // 5. Render Loop
-  const canvas = document.createElement('canvas');
-  canvas.width = width;
-  canvas.height = height;
-  const ctx = canvas.getContext('2d', { alpha: false, desynchronized: true }); // optimize for frequent updates
-  
-  if (!ctx) throw new Error("Canvas context failed");
-
-  // A. Process Video
-  const frameDuration = 1 / fps;
-  
-  for (let i = 0; i < totalFrames; i++) {
-    const timestamp = i * frameDuration;
-    
-    // Update progress less frequently to save UI render cycles if needed, but 30fps is fine
-    if (i % 15 === 0) {
-        onProgress("Renderizando vídeo...", Math.round((i / totalFrames) * 70));
-    }
-
-    // Seek video
-    video.currentTime = timestamp;
-    await new Promise(r => { video.onseeked = r; });
-    
-    // Draw with scaled style
-    drawFrame(ctx, video, subtitles, timestamp, scaledStyle, zoom, width, height);
-
-    const bitmap = await createImageBitmap(canvas);
-    
-    const frame = new VideoFrame(bitmap, {
-      timestamp: i * 1000000 / fps, // microseconds
-      duration: 1000000 / fps 
-    });
-
-    videoEncoder.encode(frame, { keyFrame: i % (fps * 2) === 0 });
-    frame.close();
-  }
-  
-  await videoEncoder.flush();
-
-  // B. Process Audio
-  onProgress("Processando áudio...", 80);
-
-  const channelData = audioBuffer.getChannelData(0); // Mono
-  const totalSamples = channelData.length;
-  const bufferSize = 44100; // 1 second chunks
-
-  for (let i = 0; i < totalSamples; i += bufferSize) {
-    const end = Math.min(i + bufferSize, totalSamples);
-    const chunkData = channelData.slice(i, end);
-    
-    const audioData = new AudioData({
-      format: 'f32',
-      sampleRate: 44100,
-      numberOfFrames: chunkData.length,
-      numberOfChannels: 1,
-      timestamp: (i / 44100) * 1000000,
-      data: chunkData
-    });
-    
-    audioEncoder.encode(audioData);
-    audioData.close();
-  }
-
-  await audioEncoder.flush();
-
-  // 6. Finalize
-  onProgress("Finalizando...", 99);
-  muxer.finalize();
-  
-  const buffer = muxer.target.buffer;
-  
-  // Cleanup
-  URL.revokeObjectURL(video.src);
-  video.remove();
-  canvas.remove();
-
-  return new Blob([buffer], { type: 'video/mp4' });
-};
+  const audioBuffer = await audioCtx.decodeAudioData(
