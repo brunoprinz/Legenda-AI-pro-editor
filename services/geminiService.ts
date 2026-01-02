@@ -66,11 +66,11 @@ const encodeWAV = (audioBuffer: AudioBuffer): ArrayBuffer => {
 };
 
 export const generateSubtitles = async (videoFile: File): Promise<Subtitle[]> => {
-  // CONFIGURAÇÃO: Substitui as aspas abaixo pela tua chave quando fores para o Netlify
-  const apiKey = "AQUI_VAI_A_TUA_CHAVE_DO_GOOGLE"; 
+  // Tenta ler do Netlify (VITE_) ou usa a string direta se você preferir colar
+  const apiKey = import.meta.env.VITE_GEMINI_API_KEY || ""; 
   
-  if (!apiKey || apiKey === "AQUI_VAI_A_TUA_CHAVE_DO_GOOGLE") {
-    throw new Error("Chave de API não configurada corretamente.");
+  if (!apiKey) {
+    throw new Error("Chave de API não configurada. Verifique as Environment Variables no Netlify.");
   }
 
   const genAI = new GoogleGenerativeAI(apiKey);
