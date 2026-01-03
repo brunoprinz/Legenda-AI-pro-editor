@@ -1,6 +1,6 @@
 ﻿import React, { useState, useRef } from 'react';
 import { Subtitle, SubtitleStyle } from './types';
-import { exportVideo } from './exportService'; 
+import { exportVideo } from './services/exportService';
 import Timeline from './components/Timeline';
 import VideoPlayer from './components/VideoPlayer';
 import StyleControls from './components/StyleControls';
