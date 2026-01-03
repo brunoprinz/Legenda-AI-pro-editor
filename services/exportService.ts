@@ -32,7 +32,7 @@ const getTargetDimensions = (originalWidth: number, originalHeight: number, reso
       height: originalHeight % 2 === 0 ? originalHeight : originalHeight - 1 
     };
   }
-  const targetH = parseInt(resolution.replace('p', ''));
+  const targetH = parseInt(String(resolution || '480').replace('p', ''));
   const ratio = originalWidth / originalHeight;
   const targetW = Math.round(targetH * ratio);
   return {
