@@ -1,4 +1,4 @@
-import { Subtitle, SubtitleStyle, ExportResolution } from "../types";
+﻿import { Subtitle, SubtitleStyle, ExportResolution } from "../types";
 import { Muxer, ArrayBufferTarget } from 'mp4-muxer';
 
 // WebCodecs Type Declarations
@@ -25,20 +25,29 @@ declare class AudioData {
   readonly duration: number;
 }
 
+// Força dimensões pares e seguras para o Codec
+
+// Copie e cole esta função no lugar da atual no seu exportService.ts
 const getTargetDimensions = (originalWidth: number, originalHeight: number, resolution: ExportResolution) => {
-  if (resolution === 'original') {
-    return { 
-      width: originalWidth % 2 === 0 ? originalWidth : originalWidth - 1, 
-      height: originalHeight % 2 === 0 ? originalHeight : originalHeight - 1 
-    };
+  const safeOrigW = originalWidth || 640;
+  const safeOrigH = originalHeight || 360;
+
+  let targetH = safeOrigH;
+
+  if (resolution !== 'original') {
+    // Extrai o número da resolução (ex: "480p" vira 480)
+    const resValue = parseInt(String(resolution).match(/\d+/)?.[0] || "480");
+    targetH = resValue;
   }
-  const targetH = parseInt(String(resolution || '480').replace('p', ''));
-  const ratio = originalWidth / originalHeight;
-  const targetW = Math.round(targetH * ratio);
-  return {
-    width: targetW % 2 === 0 ? targetW : targetW + 1,
-    height: targetH % 2 === 0 ? targetH : targetH + 1
-  };
+
+  const ratio = safeOrigW / safeOrigH;
+  const targetW = targetH * ratio;
+
+  // A MÁGICA: Math.floor(n / 2) * 2 garante que o número seja PAR e não estoure o limite
+  const finalW = Math.max(2, Math.floor(targetW / 2) * 2);
+  const finalH = Math.max(2, Math.floor(targetH / 2) * 2);
+
+  return { width: finalW, height: finalH };
 };
 
 const getBitrate = (width: number, height: number) => {
