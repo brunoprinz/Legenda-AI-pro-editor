@@ -43,8 +43,8 @@ const getTargetDimensions = (originalWidth: number, originalHeight: number, reso
 
 const getBitrate = (width: number, height: number) => {
   const pixels = width * height;
-  if (pixels <= 426 * 240) return 400_000; // Otimizado para 240p
-  if (pixels <= 854 * 480) return 1_000_000; // Otimizado para 480p
+  if (pixels <= 426 * 240) return 400_000;
+  if (pixels <= 854 * 480) return 1_000_000;
   if (pixels <= 1280 * 720) return 2_500_000;
   return 5_000_000;
 };
@@ -58,7 +58,7 @@ const drawFrame = (
   zoom: number,
   canvasWidth: number,
   canvasHeight: number,
-  scaleFactor: number // Adicionado para ajustar tamanho da fonte
+  scaleFactor: number
 ) => {
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.clearRect(0, 0, canvasWidth, canvasHeight);
@@ -77,8 +77,6 @@ const drawFrame = (
   const activeSub = subtitles.find(s => timestamp >= s.startTime && timestamp <= s.endTime);
   if (activeSub) {
     ctx.save();
-    
-    // Ajusta o tamanho da fonte e borda proporcionalmente à resolução de saída
     const adjustedFontSize = style.fontSize * scaleFactor;
     const adjustedOutline = (style.outlineWidth || 0) * scaleFactor;
 
@@ -87,7 +85,7 @@ const drawFrame = (
     ctx.textBaseline = 'bottom';
     
     const x = canvasWidth / 2;
-    const y = canvasHeight * 0.9; // 10% de margem inferior fixa na exportação
+    const y = canvasHeight * 0.9;
     
     const maxWidth = canvasWidth * 0.9;
     const words = activeSub.text.split(' ');
@@ -110,22 +108,16 @@ const drawFrame = (
 
     lines.forEach((l, i) => {
       const lineY = startY + (i * lineHeight);
-      
-      // Desenha o fundo da legenda se houver
       if (style.backgroundColor && style.backgroundColor !== 'transparent') {
         const metrics = ctx.measureText(l);
         ctx.fillStyle = style.backgroundColor;
         ctx.fillRect(x - metrics.width/2 - 5, lineY - adjustedFontSize, metrics.width + 10, adjustedFontSize + 5);
       }
-
-      // Stroke/Borda
       if (adjustedOutline > 0) {
         ctx.strokeStyle = style.outlineColor || '#000000';
         ctx.lineWidth = adjustedOutline;
         ctx.strokeText(l, x, lineY);
       }
-      
-      // Texto
       ctx.fillStyle = style.color;
       ctx.fillText(l, x, lineY);
     });
@@ -147,10 +139,7 @@ export const exportVideo = async (
   await new Promise((resolve) => { video.onloadedmetadata = resolve; });
 
   const { width, height } = getTargetDimensions(video.videoWidth, video.videoHeight, resolution);
-  
-  // Fator de escala: se o vídeo original é 1080p e exportamos 240p, as fontes precisam diminuir
   const scaleFactor = height / video.videoHeight;
-  
   const fps = 30;
   const duration = video.duration;
   const totalFrames = Math.floor(duration * fps);
@@ -183,55 +172,45 @@ export const exportVideo = async (
     const timestamp = i / fps;
     video.currentTime = timestamp;
     await new Promise(r => { video.onseeked = r; });
-    
-    // Passamos o scaleFactor para o drawFrame
     drawFrame(ctx, video, subtitles, timestamp, style, zoom, width, height, scaleFactor);
-    
     const frame = new VideoFrame(canvas, { timestamp: timestamp * 1e6 });
     videoEncoder.encode(frame);
     frame.close();
-
-    if (i % 10 === 0) {
-      onProgress('Renderizando...', (i / totalFrames) * 95);
-    }
+    if (i % 10 === 0) onProgress('Renderizando...', (i / totalFrames) * 95);
   }
 
-  // ... fim do loop for
-  
   onProgress('Finalizando vídeo...', 96);
   
-  // Plano B: Flush com Timeout para não travar no Windows 7
   try {
     await Promise.race([
       videoEncoder.flush(),
-      new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout no Flush")), 5000))
+      new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout")), 8000))
     ]);
   } catch (e) {
-    console.warn("Aviso: Flush demorou demais, tentando finalizar mesmo assim...");
+    console.warn("Finalização forçada.");
   }
 
-  videoEncoder.close();
+  if (videoEncoder.state !== 'closed') videoEncoder.close();
 
-  onProgress('Gerando arquivo final...', 98);
-  
-  // Pequena espera para o Muxer organizar os pedaços (chunks)
+  onProgress('Gerando arquivo...', 98);
   await new Promise(r => setTimeout(r, 2000)); 
 
   const result = muxer.finalize();
-  
-  // Verificação de corpo do arquivo
-  if (result.byteLength < 100) {
-    alert("O sistema não conseguiu processar o vídeo. Tente em 240p e com uma aba exclusiva.");
-    return;
-  }
+  if (result.byteLength < 100) throw new Error("Arquivo vazio");
 
   const blob = new Blob([result], { type: 'video/mp4' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
+  a.style.display = 'none';
   a.href = url;
   a.download = `video-legendado-${resolution}.mp4`;
-  document.body.appendChild(a); // Garante que o link existe no DOM
+  document.body.appendChild(a);
   a.click();
-  document.body.removeChild(a);
+  
+  setTimeout(() => {
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }, 100);
   
   onProgress('Concluído!', 100);
+}; // <--- ESSA CHAVE AQUI ERA O QUE FALTAVA!
