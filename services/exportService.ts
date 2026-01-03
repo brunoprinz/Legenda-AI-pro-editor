@@ -198,8 +198,15 @@ export const exportVideo = async (
 
   onProgress('Finalizando...', 98);
   await videoEncoder.flush();
+  videoEncoder.close(); // Adicione isso para liberar o encoder
 
   const result = muxer.finalize();
+ 
+// Verificação de segurança:
+  if (result.byteLength < 100) {
+    throw new Error("Falha na geração dos dados do vídeo.");
+  }
+
   const blob = new Blob([result], { type: 'video/mp4' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');

@@ -94,56 +94,76 @@ const App: React.FC = () => {
     setIsPlaying(!isPlaying);
   };
 
-  const handleExport = async () => {
-    if (!videoFile) return;
-    setExportStatus({ msg: 'Iniciando...', progress: 0 });
-    try {
-      await exportVideo(videoFile, subtitles, style, 1, res as any, (msg, progress) => {
-        setExportStatus({ msg, progress });
-      });
-      setExportStatus(null);
-    } catch (e) {
-      alert("Erro na exportação");
-      setExportStatus(null);
-    }
-  };
+// 1. Atualize a função handleExport para garantir que ela espere o processo
+const handleExport = async () => {
+  if (!videoFile || exportStatus) return;
+  
+  setExportStatus({ msg: 'Iniciando...', progress: 0 });
+  
+  try {
+    // Adicionamos um pequeno delay para garantir que o navegador liberou memória
+    await new Promise(r => setTimeout(r, 500));
+    
+    await exportVideo(videoFile, subtitles, style, 1, res as any, (msg, progress) => {
+      setExportStatus({ msg, progress });
+    });
+    
+    // Sucesso!
+    setTimeout(() => setExportStatus(null), 3000); 
+  } catch (e) {
+    console.error("Erro completo:", e);
+    alert("Erro na exportação. Verifique o console.");
+    setExportStatus(null);
+  }
+};
+
+
 
   return (
     <div className="min-h-screen bg-brand-950 text-white flex flex-col">
-      <header className="h-16 border-b border-brand-800 flex items-center justify-between px-6 bg-brand-900/50 backdrop-blur-md sticky top-0 z-50">
-        <div className="flex items-center gap-2">
-          <Wand2 className="text-brand-500" />
-          <h1 className="font-bold tracking-tighter text-xl">SUBTITLE<span className="text-brand-500">AI</span></h1>
-        </div>
-        <div className="flex items-center gap-4">
-          {/* Seletor de Resolução para Windows 7 / PCs Antigos */}
-          <select 
-            value={res} 
-            onChange={(e) => setRes(e.target.value as any)}
-            className="bg-brand-800 border border-brand-700 text-xs p-2 rounded outline-none"
-          >
-            <option value="240p">Exportar 240p (Muito Rápido)</option>
-            <option value="480p">Exportar 480p (Recomendado)</option>
-            <option value="original">Resolução Original (Lento)</option>
-          </select>
+      // 2. Ajuste no Header para o botão ficar clicável (z-index e cursor)
+// Procure a tag <header> e substitua por esta:
+<header className="h-16 border-b border-brand-800 flex items-center justify-between px-6 bg-brand-900/80 backdrop-blur-md sticky top-0 z-[100]">
+  <div className="flex items-center gap-2 pointer-events-none">
+    <Wand2 className="text-brand-500" />
+    <h1 className="font-bold tracking-tighter text-xl">SUBTITLE<span className="text-brand-500">AI</span></h1>
+  </div>
+  
+  <div className="flex items-center gap-4 relative z-[110]">
+    <select 
+      value={res} 
+      onChange={(e) => setRes(e.target.value as any)}
+      className="bg-brand-800 border border-brand-700 text-xs p-2 rounded outline-none cursor-pointer"
+    >
+      <option value="240p">240p (Muito Rápido)</option>
+      <option value="480p">480p (Recomendado)</option>
+      <option value="original">Original</option>
+    </select>
 
-          <button onClick={() => setShowImportArea(!showImportArea)} className="flex items-center gap-2 px-4 py-2 bg-brand-700 hover:bg-brand-600 rounded-lg text-sm transition">
-            <ClipboardPaste size={18} /> Importar IA
-          </button>
-          
-          <button 
-            onClick={handleExport}
-            disabled={!!exportStatus || !videoFile}
-            className={`flex items-center gap-2 px-6 py-2 rounded-lg font-bold transition text-sm ${exportStatus ? 'bg-gray-600' : 'bg-brand-500 hover:bg-brand-400'}`}
-          >
-            {exportStatus ? (
-              <><Loader2 className="animate-spin" size={18} /> {Math.round(exportStatus.progress)}%</>
-            ) : (
-              <><Download size={18} /> Exportar</>
-            )}
-          </button>
-        </div>
-      </header>
+    <button 
+      onClick={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setShowImportArea(!showImportArea);
+      }} 
+      className="flex items-center gap-2 px-4 py-2 bg-brand-700 hover:bg-brand-600 rounded-lg text-sm transition relative z-[120] cursor-pointer"
+    >
+      <ClipboardPaste size={18} /> Importar IA
+    </button>
+    
+    <button 
+      onClick={handleExport}
+      disabled={!!exportStatus}
+      className={`flex items-center gap-2 px-6 py-2 rounded-lg font-bold transition text-sm cursor-pointer ${exportStatus ? 'bg-brand-800 text-gray-500' : 'bg-brand-500 hover:bg-brand-400 text-white'}`}
+    >
+      {exportStatus ? (
+        <><Loader2 className="animate-spin" size={18} /> {Math.round(exportStatus.progress)}%</>
+      ) : (
+        <><Download size={18} /> Exportar</>
+      )}
+    </button>
+  </div>
+</header>
 
       <main className="flex-1 flex overflow-hidden">
         <div className="flex-1 flex flex-col p-6 overflow-y-auto">
