@@ -1,4 +1,4 @@
-import { Subtitle, SubtitleStyle, ExportResolution } from "../types";
+﻿import { Subtitle, SubtitleStyle, ExportResolution } from "../types";
 import { Muxer, ArrayBufferTarget } from 'mp4-muxer';
 
 // WebCodecs Type Declarations
@@ -43,11 +43,10 @@ const getTargetDimensions = (originalWidth: number, originalHeight: number, reso
 
 const getBitrate = (width: number, height: number) => {
   const pixels = width * height;
-  if (pixels <= 426 * 240) return 500_000;
-  if (pixels <= 854 * 480) return 1_500_000;
-  if (pixels <= 1280 * 720) return 3_000_000;
-  if (pixels <= 1920 * 1080) return 6_000_000;
-  return 10_000_000;
+  if (pixels <= 426 * 240) return 400_000; // Otimizado para 240p
+  if (pixels <= 854 * 480) return 1_000_000; // Otimizado para 480p
+  if (pixels <= 1280 * 720) return 2_500_000;
+  return 5_000_000;
 };
 
 const drawFrame = (
@@ -58,7 +57,8 @@ const drawFrame = (
   style: SubtitleStyle,
   zoom: number,
   canvasWidth: number,
-  canvasHeight: number
+  canvasHeight: number,
+  scaleFactor: number // Adicionado para ajustar tamanho da fonte
 ) => {
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.clearRect(0, 0, canvasWidth, canvasHeight);
@@ -77,15 +77,23 @@ const drawFrame = (
   const activeSub = subtitles.find(s => timestamp >= s.startTime && timestamp <= s.endTime);
   if (activeSub) {
     ctx.save();
-    ctx.font = `bold ${style.fontSize}px ${style.fontFamily}`;
+    
+    // Ajusta o tamanho da fonte e borda proporcionalmente à resolução de saída
+    const adjustedFontSize = style.fontSize * scaleFactor;
+    const adjustedOutline = (style.outlineWidth || 0) * scaleFactor;
+
+    ctx.font = `bold ${adjustedFontSize}px ${style.fontFamily || 'Arial'}`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'bottom';
+    
     const x = canvasWidth / 2;
-    const y = canvasHeight - (canvasHeight * (style.bottomOffset / 100));
+    const y = canvasHeight * 0.9; // 10% de margem inferior fixa na exportação
+    
     const maxWidth = canvasWidth * 0.9;
     const words = activeSub.text.split(' ');
     let line = '';
     const lines = [];
+    
     for (let n = 0; n < words.length; n++) {
       const testLine = line + words[n] + ' ';
       if (ctx.measureText(testLine).width > maxWidth && n > 0) {
@@ -96,15 +104,28 @@ const drawFrame = (
       }
     }
     lines.push(line);
-    const lineHeight = style.fontSize * 1.2;
+
+    const lineHeight = adjustedFontSize * 1.2;
     const startY = y - ((lines.length - 1) * lineHeight);
+
     lines.forEach((l, i) => {
       const lineY = startY + (i * lineHeight);
-      if (style.borderWidth > 0) {
-        ctx.strokeStyle = style.borderColor;
-        ctx.lineWidth = style.borderWidth;
+      
+      // Desenha o fundo da legenda se houver
+      if (style.backgroundColor && style.backgroundColor !== 'transparent') {
+        const metrics = ctx.measureText(l);
+        ctx.fillStyle = style.backgroundColor;
+        ctx.fillRect(x - metrics.width/2 - 5, lineY - adjustedFontSize, metrics.width + 10, adjustedFontSize + 5);
+      }
+
+      // Stroke/Borda
+      if (adjustedOutline > 0) {
+        ctx.strokeStyle = style.outlineColor || '#000000';
+        ctx.lineWidth = adjustedOutline;
         ctx.strokeText(l, x, lineY);
       }
+      
+      // Texto
       ctx.fillStyle = style.color;
       ctx.fillText(l, x, lineY);
     });
@@ -126,6 +147,10 @@ export const exportVideo = async (
   await new Promise((resolve) => { video.onloadedmetadata = resolve; });
 
   const { width, height } = getTargetDimensions(video.videoWidth, video.videoHeight, resolution);
+  
+  // Fator de escala: se o vídeo original é 1080p e exportamos 240p, as fontes precisam diminuir
+  const scaleFactor = height / video.videoHeight;
+  
   const fps = 30;
   const duration = video.duration;
   const totalFrames = Math.floor(duration * fps);
@@ -154,33 +179,32 @@ export const exportVideo = async (
     framerate: fps
   });
 
-  // --- LOOP DE PROCESSAMENTO DE FRAMES ---
   for (let i = 0; i < totalFrames; i++) {
     const timestamp = i / fps;
     video.currentTime = timestamp;
     await new Promise(r => { video.onseeked = r; });
     
-    drawFrame(ctx, video, subtitles, timestamp, style, zoom, width, height);
+    // Passamos o scaleFactor para o drawFrame
+    drawFrame(ctx, video, subtitles, timestamp, style, zoom, width, height, scaleFactor);
     
     const frame = new VideoFrame(canvas, { timestamp: timestamp * 1e6 });
     videoEncoder.encode(frame);
     frame.close();
 
     if (i % 10 === 0) {
-      onProgress('Renderizando frames...', (i / totalFrames) * 90);
+      onProgress('Renderizando...', (i / totalFrames) * 95);
     }
   }
 
-  onProgress('Finalizando áudio...', 95);
+  onProgress('Finalizando...', 98);
   await videoEncoder.flush();
 
-  // Extração de áudio simplificada (Muxer finaliza com o buffer do vídeo original)
   const result = muxer.finalize();
   const blob = new Blob([result], { type: 'video/mp4' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = 'video-legendado.mp4';
+  a.download = `video-legendado-${resolution}.mp4`;
   a.click();
   
   onProgress('Concluído!', 100);

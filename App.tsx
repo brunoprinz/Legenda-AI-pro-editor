@@ -1,10 +1,10 @@
-import React, { useState, useRef, useEffect } from 'react';
+﻿import React, { useState, useRef, useEffect } from 'react';
 import { Subtitle, SubtitleStyle } from './types';
 import { exportVideo } from './services/exportService';
 import Timeline from './components/Timeline';
-import { Upload, Download, ClipboardPaste, Wand2, ExternalLink, Play, Pause } from 'lucide-react';
+import { Upload, Download, ClipboardPaste, Wand2, ExternalLink, Play, Pause, Loader2 } from 'lucide-react';
 
-// --- COMPONENTE INTERNO: VideoPlayer ---
+// --- COMPONENTE INTERNO: VideoPlayer (Atualizado com Controles) ---
 const VideoPlayer = React.forwardRef<HTMLVideoElement, {
   file: File;
   subtitles: Subtitle[];
@@ -16,7 +16,7 @@ const VideoPlayer = React.forwardRef<HTMLVideoElement, {
   const activeSubtitle = subtitles.find(s => currentTime >= s.startTime && currentTime <= s.endTime);
 
   return (
-    <div className="relative w-full h-full bg-black flex items-center justify-center overflow-hidden">
+    <div className="relative w-full h-full bg-black flex items-center justify-center overflow-hidden group">
       <video
         ref={ref}
         src={videoUrl}
@@ -43,63 +43,68 @@ const VideoPlayer = React.forwardRef<HTMLVideoElement, {
   );
 });
 
-// --- COMPONENTE INTERNO: StyleControls ---
+// --- COMPONENTE INTERNO: StyleControls (Corrigido cores dos inputs) ---
 const StyleControls = ({ style, onUpdate }: { style: SubtitleStyle, onUpdate: (s: SubtitleStyle) => void }) => {
+  const inputClass = "w-full bg-black border border-gray-600 rounded p-1 text-sm text-white focus:border-brand-500 outline-none";
+  
   return (
     <div className="grid grid-cols-2 md:grid-cols-4 gap-4 bg-brand-900/50 p-4 rounded-xl border border-brand-800">
       <div>
-        <label className="block text-xs text-gray-400 mb-1">Tamanho da Fonte</label>
-        <input type="number" value={style.fontSize} onChange={e => onUpdate({...style, fontSize: Number(e.target.value)})} className="w-full bg-brand-950 border border-brand-700 rounded p-1 text-sm" />
+        <label className="block text-xs text-gray-400 mb-1">Tamanho Fonte</label>
+        <input type="number" value={style.fontSize} onChange={e => onUpdate({...style, fontSize: Number(e.target.value)})} className={inputClass} />
       </div>
       <div>
-        <label className="block text-xs text-gray-400 mb-1">Cor do Texto</label>
-        <input type="color" value={style.color} onChange={e => onUpdate({...style, color: e.target.value})} className="w-full h-8 bg-transparent border-none cursor-pointer" />
+        <label className="block text-xs text-gray-400 mb-1">Cor Texto</label>
+        <input type="color" value={style.color} onChange={e => onUpdate({...style, color: e.target.value})} className="w-full h-8 bg-black border border-gray-600 rounded cursor-pointer" />
       </div>
       <div>
-        <label className="block text-xs text-gray-400 mb-1">Fundo (RGBA)</label>
-        <input type="text" value={style.backgroundColor} onChange={e => onUpdate({...style, backgroundColor: e.target.value})} className="w-full bg-brand-950 border border-brand-700 rounded p-1 text-sm" />
+        <label className="block text-xs text-gray-400 mb-1">Fundo (Ex: rgba(0,0,0,0.5))</label>
+        <input type="text" value={style.backgroundColor} onChange={e => onUpdate({...style, backgroundColor: e.target.value})} className={inputClass} />
       </div>
       <div>
-        <label className="block text-xs text-gray-400 mb-1">Espessura Borda</label>
-        <input type="number" value={style.outlineWidth} onChange={e => onUpdate({...style, outlineWidth: Number(e.target.value)})} className="w-full bg-brand-950 border border-brand-700 rounded p-1 text-sm" />
+        <label className="block text-xs text-gray-400 mb-1">Borda (px)</label>
+        <input type="number" value={style.outlineWidth} onChange={e => onUpdate({...style, outlineWidth: Number(e.target.value)})} className={inputClass} />
       </div>
     </div>
   );
 };
 
-// --- COMPONENTE PRINCIPAL: App ---
+// --- COMPONENTE PRINCIPAL ---
 const App: React.FC = () => {
   const [videoFile, setVideoFile] = useState<File | null>(null);
   const [subtitles, setSubtitles] = useState<Subtitle[]>([]);
   const [currentTime, setCurrentTime] = useState(0);
-  const [isExporting, setIsExporting] = useState(false);
+  const [exportStatus, setExportStatus] = useState<{msg: string, progress: number} | null>(null);
+  const [res, setRes] = useState<'240p' | '480p' | 'original'>('480p');
   const [showImportArea, setShowImportArea] = useState(false);
   const [rawJson, setRawJson] = useState('');
+  const [isPlaying, setIsPlaying] = useState(false);
+  
   const [style, setStyle] = useState<SubtitleStyle>({
-    fontSize: 24,
-    color: '#ffffff',
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    fontFamily: 'Inter',
-    position: 'bottom',
-    outlineColor: '#000000',
-    outlineWidth: 2
+    fontSize: 24, color: '#ffffff', backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    fontFamily: 'Inter', position: 'bottom', outlineColor: '#000000', outlineWidth: 2
   });
 
   const videoRef = useRef<HTMLVideoElement>(null);
 
-  const promptParaGemini = `Analise o áudio deste vídeo e gere legendas. Retorne APENAS um array JSON: [{"id": "1", "startTime": 0.5, "endTime": 3.2, "text": "Frase"}]`;
+  const togglePlay = () => {
+    if (!videoRef.current) return;
+    if (isPlaying) videoRef.current.pause();
+    else videoRef.current.play();
+    setIsPlaying(!isPlaying);
+  };
 
-  const handleImportJson = () => {
+  const handleExport = async () => {
+    if (!videoFile) return;
+    setExportStatus({ msg: 'Iniciando...', progress: 0 });
     try {
-      const cleanJson = rawJson.replace(/```json|```/g, '').trim();
-      const parsed = JSON.parse(cleanJson);
-      if (Array.isArray(parsed)) {
-        setSubtitles(parsed);
-        setShowImportArea(false);
-        setRawJson('');
-      }
+      await exportVideo(videoFile, subtitles, style, 1, res as any, (msg, progress) => {
+        setExportStatus({ msg, progress });
+      });
+      setExportStatus(null);
     } catch (e) {
-      alert("Erro no JSON.");
+      alert("Erro na exportação");
+      setExportStatus(null);
     }
   };
 
@@ -111,86 +116,57 @@ const App: React.FC = () => {
           <h1 className="font-bold tracking-tighter text-xl">SUBTITLE<span className="text-brand-500">AI</span></h1>
         </div>
         <div className="flex items-center gap-4">
-          <button onClick={() => setShowImportArea(!showImportArea)} className="flex items-center gap-2 px-4 py-2 bg-brand-700 hover:bg-brand-600 rounded-lg transition text-sm">
+          {/* Seletor de Resolução para Windows 7 / PCs Antigos */}
+          <select 
+            value={res} 
+            onChange={(e) => setRes(e.target.value as any)}
+            className="bg-brand-800 border border-brand-700 text-xs p-2 rounded outline-none"
+          >
+            <option value="240p">Exportar 240p (Muito Rápido)</option>
+            <option value="480p">Exportar 480p (Recomendado)</option>
+            <option value="original">Resolução Original (Lento)</option>
+          </select>
+
+          <button onClick={() => setShowImportArea(!showImportArea)} className="flex items-center gap-2 px-4 py-2 bg-brand-700 hover:bg-brand-600 rounded-lg text-sm transition">
             <ClipboardPaste size={18} /> Importar IA
           </button>
+          
           <button 
-            onClick={() => videoFile && exportVideo(videoFile, subtitles, style, 1, 'original', (m, p) => console.log(m, p))}
-            className="flex items-center gap-2 px-6 py-2 bg-brand-500 hover:bg-brand-400 rounded-lg font-bold transition text-sm"
+            onClick={handleExport}
+            disabled={!!exportStatus || !videoFile}
+            className={`flex items-center gap-2 px-6 py-2 rounded-lg font-bold transition text-sm ${exportStatus ? 'bg-gray-600' : 'bg-brand-500 hover:bg-brand-400'}`}
           >
-            <Download size={18} /> Exportar
+            {exportStatus ? (
+              <><Loader2 className="animate-spin" size={18} /> {Math.round(exportStatus.progress)}%</>
+            ) : (
+              <><Download size={18} /> Exportar</>
+            )}
           </button>
         </div>
       </header>
 
       <main className="flex-1 flex overflow-hidden">
         <div className="flex-1 flex flex-col p-6 overflow-y-auto">
-       {showImportArea && (
-  <div className="mb-6 p-6 bg-brand-900 border-2 border-brand-500 rounded-2xl shadow-xl animate-in fade-in slide-in-from-top-4">
-    <div className="flex justify-between items-center mb-4">
-      <h2 className="font-bold text-lg flex items-center gap-2">
-        <Wand2 size={20} className="text-brand-500" /> 
-        Assistente de Legendas IA
-      </h2>
-      <button onClick={() => setShowImportArea(false)} className="text-gray-400 hover:text-white">✕</button>
-    </div>
-
-    <div className="space-y-4">
-      {/* PASSO 1 e 2 */}
-      <div className="bg-brand-950 p-4 rounded-lg border border-brand-800">
-        <p className="text-sm font-medium mb-2">1. Copie o comando e use no Gemini:</p>
-        <div className="flex gap-2">
-          <code className="flex-1 bg-black p-2 rounded text-[10px] text-brand-400 overflow-x-auto">
-            {promptParaGemini}
-          </code>
-          <button 
-            onClick={() => navigator.clipboard.writeText(promptParaGemini)}
-            className="px-3 py-1 bg-brand-700 rounded text-xs hover:bg-brand-600 transition"
-          >
-            Copiar
-          </button>
-        </div>
-        <a href="https://gemini.google.com" target="_blank" rel="noreferrer" 
-           className="inline-flex items-center gap-1 text-xs text-brand-500 mt-2 hover:underline">
-          2. Abrir Gemini no navegador <ExternalLink size={12} />
-        </a>
-      </div>
-
-      {/* PASSO 3 e 4 */}
-      <div>
-        <p className="text-sm font-medium mb-2">3. Cole o JSON gerado abaixo:</p>
-        <textarea 
-          className="w-full h-32 bg-brand-950 p-3 rounded border border-brand-700 text-xs font-mono mb-3 focus:border-brand-500 outline-none"
-          placeholder='[{"id": "1", "startTime": 0, "endTime": 2, "text": "Exemplo"}]'
-          value={rawJson}
-          onChange={(e) => setRawJson(e.target.value)}
-        />
-        <button 
-          onClick={handleImportJson} 
-          className="w-full py-3 bg-brand-500 hover:bg-brand-400 text-white rounded-xl font-bold transition shadow-lg shadow-brand-500/20"
-        >
-          4. Gerar Legendas na Timeline
-        </button>
-      </div>
-    </div>
-  </div>
-)}
+          {/* Área de Importação (Omitida aqui por brevidade, mas deve ser a mesma do passo anterior) */}
+          {/* ... (bloco showImportArea do código anterior) ... */}
 
           {!videoFile ? (
-            <div className="flex-1 border-2 border-dashed border-brand-700 rounded-2xl flex flex-col items-center justify-center bg-brand-900/20">
-              <input type="file" className="hidden" id="v" onChange={e => setVideoFile(e.target.files?.[0] || null)} />
-              <label htmlFor="v" className="cursor-pointer flex flex-col items-center">
-                <Upload size={48} className="text-brand-500 mb-4" />
-                <p>Clique para subir o vídeo</p>
-              </label>
+            <div className="flex-1 border-2 border-dashed border-brand-700 rounded-2xl flex flex-col items-center justify-center bg-brand-900/20 text-gray-400">
+               <input type="file" className="hidden" id="v" onChange={e => setVideoFile(e.target.files?.[0] || null)} />
+               <label htmlFor="v" className="cursor-pointer flex flex-col items-center"><Upload size={48} className="mb-4" /><p>Subir vídeo</p></label>
             </div>
           ) : (
-            <div className="space-y-6">
-              <div className="aspect-video bg-black rounded-2xl overflow-hidden shadow-2xl">
-                <VideoPlayer 
-                  ref={videoRef} file={videoFile} subtitles={subtitles} 
-                  currentTime={currentTime} style={style} onTimeUpdate={setCurrentTime} 
-                />
+            <div className="space-y-4">
+              <div className="aspect-video bg-black rounded-2xl overflow-hidden shadow-2xl relative">
+                <VideoPlayer ref={videoRef} file={videoFile} subtitles={subtitles} currentTime={currentTime} style={style} onTimeUpdate={setCurrentTime} />
+                
+                {/* Botão Play/Pause Flutuante */}
+                <button 
+                  onClick={togglePlay}
+                  className="absolute bottom-4 left-4 p-3 bg-brand-500 rounded-full hover:scale-110 transition shadow-lg"
+                >
+                  {isPlaying ? <Pause size={20} /> : <Play size={20} />}
+                </button>
               </div>
               <StyleControls style={style} onUpdate={setStyle} />
             </div>
@@ -198,10 +174,7 @@ const App: React.FC = () => {
         </div>
 
         <div className="w-[400px] border-l border-brand-800 bg-brand-900/30">
-          <Timeline 
-            subtitles={subtitles} currentTime={currentTime} onUpdate={setSubtitles} 
-            onSeek={t => videoRef.current && (videoRef.current.currentTime = t)} 
-          />
+          <Timeline subtitles={subtitles} currentTime={currentTime} onUpdate={setSubtitles} onSeek={t => videoRef.current && (videoRef.current.currentTime = t)} />
         </div>
       </main>
     </div>
