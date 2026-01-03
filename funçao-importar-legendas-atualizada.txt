@@ -1,0 +1,79 @@
+﻿// Prompt otimizado para você copiar
+  const promptParaGemini = `Analise o áudio deste vídeo e gere legendas em Português. 
+Retorne APENAS um array JSON puro, sem textos explicativos, seguindo este formato exato:
+[
+  {"id": "1", "startTime": 0.5, "endTime": 3.2, "text": "Frase falada aqui"},
+  {"id": "2", "startTime": 3.5, "endTime": 6.0, "text": "Próxima frase"}
+]`;
+
+  const handleCopyPrompt = () => {
+    navigator.clipboard.writeText(promptParaGemini);
+    alert("Prompt copiado! Agora cole no Gemini junto com seu arquivo de áudio/vídeo.");
+  };
+
+  const handleImportJson = () => {
+    try {
+      // Limpa possíveis marcações de Markdown (```json ... ```) que o Gemini costuma colocar
+      const cleanJson = rawJson.replace(/```json|```/g, '').trim();
+      const parsed = JSON.parse(cleanJson);
+      
+      if (Array.isArray(parsed)) {
+        setSubtitles(parsed);
+        setShowImportArea(false);
+        setRawJson('');
+        alert("Legendas importadas com sucesso!");
+      }
+    } catch (e) {
+      alert("Erro no formato. Certifique-se de copiar o JSON completo gerado pela IA.");
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-brand-950 text-white flex flex-col">
+      {/* Header e Main originais permanecem... */}
+      
+      {/* Área de Importação Reformulada */}
+      {showImportArea && (
+        <div className="mb-6 p-6 bg-brand-900 border border-brand-500 rounded-2xl shadow-2xl animate-in fade-in slide-in-from-top-4">
+          <h2 className="text-lg font-bold mb-4 flex items-center gap-2">
+            <Wand2 className="text-brand-500" size={20} /> Gerar com IA Externa
+          </h2>
+          
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+            <div className="p-4 bg-brand-800 rounded-xl border border-brand-700">
+              <span className="text-brand-500 font-black text-xl mb-2 block">1.</span>
+              <p className="text-sm mb-3 text-gray-300">Copie o prompt configurado para o Gemini.</p>
+              <button onClick={handleCopyPrompt} className="w-full py-2 bg-brand-700 hover:bg-brand-600 rounded text-xs font-bold transition">
+                COPIAR PROMPT
+              </button>
+            </div>
+
+            <div className="p-4 bg-brand-800 rounded-xl border border-brand-700">
+              <span className="text-brand-500 font-black text-xl mb-2 block">2.</span>
+              <p className="text-sm mb-3 text-gray-300">Vá ao Gemini e envie o vídeo/áudio com o prompt.</p>
+              <a href="https://gemini.google.com" target="_blank" rel="noreferrer" className="block w-full py-2 bg-brand-700 hover:bg-brand-600 rounded text-xs font-bold text-center transition">
+                ABRIR GEMINI
+              </a>
+            </div>
+
+            <div className="p-4 bg-brand-800 rounded-xl border border-brand-700">
+              <span className="text-brand-500 font-black text-xl mb-2 block">3.</span>
+              <p className="text-sm mb-3 text-gray-300">Cole o JSON gerado abaixo e confirme.</p>
+              <textarea 
+                className="w-full h-20 bg-brand-950 p-2 rounded border border-brand-600 text-[10px] font-mono"
+                placeholder="Cole o [ { ... } ] aqui"
+                value={rawJson}
+                onChange={(e) => setRawJson(e.target.value)}
+              />
+            </div>
+          </div>
+          
+          <button 
+            onClick={handleImportJson}
+            disabled={!rawJson}
+            className="w-full py-3 bg-brand-500 hover:bg-brand-400 disabled:opacity-30 rounded-xl font-bold transition shadow-lg shadow-brand-500/20"
+          >
+            GERAR LEGENDAS NA TIMELINE
+          </button>
+        </div>
+      )}
