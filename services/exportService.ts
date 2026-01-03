@@ -1,4 +1,4 @@
-﻿import { Subtitle, SubtitleStyle, ExportResolution } from "../types";
+import { Subtitle, SubtitleStyle, ExportResolution } from "../types";
 import { Muxer, ArrayBufferTarget } from 'mp4-muxer';
 
 // WebCodecs Type Declarations
@@ -196,15 +196,33 @@ export const exportVideo = async (
     }
   }
 
-  onProgress('Finalizando...', 98);
-  await videoEncoder.flush();
-  videoEncoder.close(); // Adicione isso para liberar o encoder
+  // ... fim do loop for
+  
+  onProgress('Finalizando vídeo...', 96);
+  
+  // Plano B: Flush com Timeout para não travar no Windows 7
+  try {
+    await Promise.race([
+      videoEncoder.flush(),
+      new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout no Flush")), 5000))
+    ]);
+  } catch (e) {
+    console.warn("Aviso: Flush demorou demais, tentando finalizar mesmo assim...");
+  }
+
+  videoEncoder.close();
+
+  onProgress('Gerando arquivo final...', 98);
+  
+  // Pequena espera para o Muxer organizar os pedaços (chunks)
+  await new Promise(r => setTimeout(r, 2000)); 
 
   const result = muxer.finalize();
- 
-// Verificação de segurança:
+  
+  // Verificação de corpo do arquivo
   if (result.byteLength < 100) {
-    throw new Error("Falha na geração dos dados do vídeo.");
+    alert("O sistema não conseguiu processar o vídeo. Tente em 240p e com uma aba exclusiva.");
+    return;
   }
 
   const blob = new Blob([result], { type: 'video/mp4' });
@@ -212,7 +230,8 @@ export const exportVideo = async (
   const a = document.createElement('a');
   a.href = url;
   a.download = `video-legendado-${resolution}.mp4`;
+  document.body.appendChild(a); // Garante que o link existe no DOM
   a.click();
+  document.body.removeChild(a);
   
   onProgress('Concluído!', 100);
-};
