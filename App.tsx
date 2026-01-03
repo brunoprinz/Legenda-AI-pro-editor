@@ -1,7 +1,7 @@
 import React, { useState, useRef } from 'react';
-import { Upload, Download, Wand2, Type, Settings, Copy, ExternalLink, X, Palette } from 'lucide-react';
+import { Upload, Download, Wand2, Type, Settings, Copy, ExternalLink, X, Palette, Loader2 } from 'lucide-react';
 import Timeline from './components/Timeline';
-import { Subtitle, SubtitleStyle, VideoState, ExportProgress, ExportResolution } from './types';
+import { Subtitle, SubtitleStyle, VideoState, ExportProgress } from './types';
 import { exportVideo } from './services/exportService';
 
 const DEFAULT_STYLE: SubtitleStyle = {
@@ -25,7 +25,9 @@ export default function App() {
   const [exportProgress, setExportProgress] = useState<ExportProgress>({ status: 'idle', progress: 0 });
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [jsonInput, setJsonInput] = useState('');
-
+  
+  // AbortController para gerenciar a exportação como no seu outro editor funcional
+  const abortControllerRef = useRef<AbortController | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
 
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -58,7 +60,6 @@ export default function App() {
     try {
       const cleanJson = jsonInput.replace(/```json|```/g, "").trim();
       const parsed = JSON.parse(cleanJson);
-      // Garante que cada legenda tenha um ID (necessário para o Timeline.tsx)
       const formatted = parsed.map((s: any, i: number) => ({
         ...s,
         id: s.id || Date.now().toString() + i
@@ -66,18 +67,39 @@ export default function App() {
       setSubtitles(formatted);
       setIsModalOpen(false);
       setJsonInput('');
-    } catch (e) {
-      alert("Erro no JSON.");
-    }
+    } catch (e) { alert("Erro no JSON."); }
   };
 
   const handleExport = async () => {
     if (!videoState.file) return;
-    setExportProgress({ status: 'exporting', progress: 0, message: 'Iniciando...' });
+
+    // Inicia o controlador de aborto (mesma lógica do seu outro editor)
+    abortControllerRef.current = new AbortController();
+    setExportProgress({ status: 'exporting', progress: 0, message: 'Preparando motor de vídeo...' });
+
     try {
-      await exportVideo(videoState.file, subtitles, style, 'original', (p) => setExportProgress(p));
-    } catch (error) {
-      setExportProgress({ status: 'error', progress: 0, message: 'Falha na exportação' });
+      // Chama o exportVideo original mas com tratamento de erro aprimorado
+      await exportVideo(
+        videoState.file, 
+        subtitles, 
+        style, 
+        'original', 
+        (p) => setExportProgress(p)
+      );
+    } catch (error: any) {
+      console.error("Erro na exportação:", error);
+      setExportProgress({ 
+        status: 'error', 
+        progress: 0, 
+        message: `Falha: ${error.message || 'Erro no navegador'}` 
+      });
+    }
+  };
+
+  const cancelExport = () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      setExportProgress({ status: 'idle', progress: 0 });
     }
   };
 
@@ -95,7 +117,7 @@ export default function App() {
           <div className="h-[60vh] flex items-center justify-center border-2 border-dashed border-brand-800 rounded-3xl bg-brand-900/20">
             <label className="flex flex-col items-center gap-4 cursor-pointer p-10">
               <Upload size={48} className="text-brand-400" />
-              <p className="font-bold text-white text-center">Clique para carregar o vídeo</p>
+              <p className="font-bold text-white text-center italic">Arraste ou clique para carregar seu vídeo</p>
               <input type="file" className="hidden" accept="video/*" onChange={handleFileChange} />
             </label>
           </div>
@@ -114,38 +136,36 @@ export default function App() {
                   </span>
                 </div>
               </div>
-              <div className="bg-brand-900/50 p-4 rounded-3xl border border-brand-800 overflow-hidden">
+              <div className="bg-brand-900/50 p-4 rounded-3xl border border-brand-800">
                 <Timeline subtitles={subtitles} currentTime={currentTime} duration={videoState.duration} onUpdate={setSubtitles} onSeek={(t) => {if(videoRef.current) videoRef.current.currentTime = t}} />
               </div>
             </div>
 
             <div className="lg:col-span-4 space-y-6 h-fit">
               <div className="bg-brand-900/50 p-6 rounded-3xl border border-brand-800 space-y-6">
-                <button onClick={() => setIsModalOpen(true)} className="w-full py-4 bg-brand-500 hover:bg-brand-400 text-white rounded-xl font-bold flex items-center justify-center gap-2 transition-all shadow-lg shadow-brand-500/20">
+                <button onClick={() => setIsModalOpen(true)} className="w-full py-4 bg-brand-500 hover:bg-brand-400 text-white rounded-xl font-bold flex items-center justify-center gap-2 shadow-lg transition-all">
                   <Wand2 size={20} /> Gerar com Gemini
                 </button>
                 
                 <button onClick={handleExport} disabled={exportProgress.status === 'exporting'} className="w-full py-4 bg-white text-brand-950 hover:bg-gray-200 rounded-xl font-bold flex items-center justify-center gap-2 transition-all">
-                  <Download size={20} /> Exportar MP4
+                  {exportProgress.status === 'exporting' ? <Loader2 className="animate-spin" /> : <Download size={20} />}
+                  Exportar MP4
                 </button>
 
                 <div className="space-y-4 pt-4 border-t border-brand-800">
                   <h3 className="font-bold flex items-center gap-2 text-sm uppercase text-brand-400"><Palette size={16}/> Estilo Visual</h3>
-                  
                   <div className="grid grid-cols-2 gap-4">
-                    <label className="text-xs font-bold text-gray-400">Cor do Texto
-                      <input type="color" value={style.color} onChange={(e) => setStyle({...style, color: e.target.value})} className="w-full h-10 mt-1 block bg-transparent border-none cursor-pointer" />
+                    <label className="text-xs font-bold text-gray-400">Texto
+                      <input type="color" value={style.color} onChange={(e) => setStyle({...style, color: e.target.value})} className="w-full h-10 mt-1 block bg-transparent cursor-pointer" />
                     </label>
-                    <label className="text-xs font-bold text-gray-400">Cor da Borda
-                      <input type="color" value={style.borderColor} onChange={(e) => setStyle({...style, borderColor: e.target.value})} className="w-full h-10 mt-1 block bg-transparent border-none cursor-pointer" />
+                    <label className="text-xs font-bold text-gray-400">Borda
+                      <input type="color" value={style.borderColor} onChange={(e) => setStyle({...style, borderColor: e.target.value})} className="w-full h-10 mt-1 block bg-transparent cursor-pointer" />
                     </label>
                   </div>
-
-                  <label className="block text-xs font-bold text-gray-400">Espessura da Borda ({style.borderWidth}px)
+                  <label className="block text-xs font-bold text-gray-400">Borda: {style.borderWidth}px
                     <input type="range" min="0" max="10" value={style.borderWidth} onChange={(e) => setStyle({...style, borderWidth: parseInt(e.target.value)})} className="w-full mt-2 accent-brand-500" />
                   </label>
-                  
-                  <label className="block text-xs font-bold text-gray-400">Tamanho da Letra ({style.fontSize}px)
+                  <label className="block text-xs font-bold text-gray-400">Tamanho: {style.fontSize}px
                     <input type="range" min="12" max="100" value={style.fontSize} onChange={(e) => setStyle({...style, fontSize: parseInt(e.target.value)})} className="w-full mt-2 accent-brand-500" />
                   </label>
                 </div>
@@ -158,33 +178,33 @@ export default function App() {
           <div className="fixed inset-0 bg-black/95 flex items-center justify-center z-[100] p-6 backdrop-blur-sm">
             <div className="bg-brand-900 border border-brand-700 p-8 rounded-3xl w-full max-w-2xl space-y-6 shadow-2xl relative">
               <button onClick={() => setIsModalOpen(false)} className="absolute top-4 right-4 text-gray-500 hover:text-white"><X/></button>
-              <h2 className="text-xl font-bold flex items-center gap-2"><Wand2 className="text-brand-500"/> Importar do Gemini</h2>
+              <h2 className="text-xl font-bold flex items-center gap-2">Importar do Gemini</h2>
               <div className="grid grid-cols-2 gap-4">
-                <button onClick={copiarPromptParaIA} className="bg-brand-800 p-4 rounded-xl flex items-center justify-center gap-2 hover:bg-brand-700 font-bold transition-all border border-brand-700">
-                  <Copy size={18}/> 1. Copiar Prompt
+                <button onClick={copiarPromptParaIA} className="bg-brand-800 p-4 rounded-xl flex items-center justify-center gap-2 font-bold border border-brand-700 hover:bg-brand-700 transition-all">
+                  <Copy size={18}/> 1. Prompt
                 </button>
-                <a href="https://gemini.google.com/app" target="_blank" rel="noreferrer" className="bg-blue-600/20 p-4 rounded-xl flex items-center justify-center gap-2 border border-blue-600/50 hover:bg-blue-600/30 font-bold transition-all">
-                  <ExternalLink size={18}/> 2. Abrir Gemini
+                <a href="https://gemini.google.com/app" target="_blank" rel="noreferrer" className="bg-blue-600/20 p-4 rounded-xl flex items-center justify-center gap-2 border border-blue-600/50 font-bold hover:bg-blue-600/30 transition-all">
+                  <ExternalLink size={18}/> 2. Gemini
                 </a>
               </div>
-              <textarea className="w-full h-48 bg-brand-950 border border-brand-800 rounded-2xl p-4 font-mono text-green-400 text-sm focus:border-brand-500 outline-none" placeholder="Cole o JSON gerado aqui..." value={jsonInput} onChange={(e) => setJsonInput(e.target.value)} />
-              <button onClick={handleImportJson} className="w-full py-4 bg-brand-500 hover:bg-brand-400 rounded-2xl font-bold shadow-lg shadow-brand-500/20 transition-all uppercase tracking-widest">3. Aplicar Legendas</button>
+              <textarea className="w-full h-48 bg-brand-950 border border-brand-800 rounded-2xl p-4 font-mono text-green-400 text-sm" placeholder="Cole o JSON aqui..." value={jsonInput} onChange={(e) => setJsonInput(e.target.value)} />
+              <button onClick={handleImportJson} className="w-full py-4 bg-brand-500 hover:bg-brand-400 rounded-2xl font-bold">3. Aplicar Legendas</button>
             </div>
           </div>
         )}
         
         {exportProgress.status !== 'idle' && (
            <div className="fixed bottom-8 right-8 bg-brand-900 p-6 rounded-2xl border border-brand-700 shadow-2xl w-80 z-[110]">
-              <p className="text-sm font-bold mb-3 flex items-center gap-2">
-                {exportProgress.status === 'exporting' ? <span className="animate-pulse">●</span> : null}
-                {exportProgress.message}
+              <p className="text-sm font-bold mb-3 flex items-center justify-between">
+                <span>{exportProgress.message}</span>
+                {exportProgress.status === 'exporting' && <button onClick={cancelExport} className="text-[10px] bg-red-600 px-2 py-1 rounded text-white">Cancelar</button>}
               </p>
               <div className="w-full bg-brand-950 h-3 rounded-full overflow-hidden">
                 <div className="bg-brand-500 h-full transition-all duration-300 shadow-[0_0_10px_#e94560]" style={{width: `${exportProgress.progress}%`}} />
               </div>
-              {exportProgress.status === 'done' || exportProgress.status === 'error' ? (
+              {(exportProgress.status === 'done' || exportProgress.status === 'error') && (
                 <button onClick={() => setExportProgress({status: 'idle', progress: 0})} className="mt-4 w-full py-2 bg-brand-800 rounded-lg text-xs font-bold">Fechar</button>
-              ) : null}
+              )}
            </div>
         )}
       </div>
