@@ -2,8 +2,6 @@
 import { Subtitle, SubtitleStyle } from './types';
 import { exportVideo } from './services/exportService';
 import Timeline from './components/Timeline';
-import VideoPlayer from './components/VideoPlayer';
-import StyleControls from './components/StyleControls';
 import { Upload, Download, ClipboardPaste, Wand2, ExternalLink } from 'lucide-react';
 
 const App: React.FC = () => {
@@ -172,5 +170,6 @@ Retorne APENAS um array JSON puro, sem textos explicativos nem markdown, seguind
     </div>
   );
 };
+
 
 export default App;
