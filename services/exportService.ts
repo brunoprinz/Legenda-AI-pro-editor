@@ -1,4 +1,4 @@
-﻿import { Subtitle, SubtitleStyle, ExportResolution } from "../types";
+import { Subtitle, SubtitleStyle, ExportResolution } from "../types";
 import { Muxer, ArrayBufferTarget } from 'mp4-muxer';
 
 export const exportVideo = async (
